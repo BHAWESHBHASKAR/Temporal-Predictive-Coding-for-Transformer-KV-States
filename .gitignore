@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+site/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# HuggingFace cache
+.cache/
+hub/
+
+# Results / generated
+results/
+*.log
+
+# Large files
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.gguf
