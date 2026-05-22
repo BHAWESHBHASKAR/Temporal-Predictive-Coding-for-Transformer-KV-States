@@ -90,13 +90,13 @@ Standard attention:        144 KB/token
 ## Memory at Scale
 
 | Context | Standard 4B | PredictKV | Reduction |
-|---------|-------------|-------------|-----------|
-| 4K | 576 MB | **13 MB** | 43x |
-| 32K | 4.6 GB | **108 MB** | 43x |
-| 128K | 18.4 GB | **430 MB** | 43x |
-| 256K | 36.9 GB | **860 MB** | **43x** |
+|---------|-------------|-----------|----------|
+| 4K | 576 MB | **31 MB** | 18.7x |
+| 32K | 4.6 GB | **246 MB** | 18.7x |
+| 128K | 18.4 GB | **985 MB** | 18.7x |
+| 256K | 36.9 GB | **1.97 GB** | **18.7x** |
 
-Verified on NVIDIA RTX 3050 (4 GB) at up to 4968 tokens.
+All numbers vs standard 4B attention (144 KB/token). The 12x architecture savings from Qwen3.5's DeltaNet layers is separate. Verified on NVIDIA RTX 3050 (4 GB) at up to 4968 tokens.
 
 ---
 
