@@ -15,3 +15,6 @@ dependencies = [
     "numpy",
     "matplotlib",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]

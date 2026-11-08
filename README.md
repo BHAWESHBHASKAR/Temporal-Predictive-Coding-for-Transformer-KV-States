@@ -9,22 +9,20 @@
 ## Quick Answers
 
 ### What did we produce?
-A complete inference-time KV cache compression system. **PredictKV** achieves **18.7x compression** vs standard attention with **zero perplexity loss**, **4% latency overhead**, and **30 seconds of training**. The full system (paper + code + benchmarks + 7 figures) is in this repository.
+An inference-time KV cache compression experiment. The method itself (an AR(2) key predictor storing only residuals, plus SVD rank 8 on keys and INT8 on values) gives about **1.6x compression on attention layers**. The headline **18.7x** is measured against a standard-attention 4B baseline (144 KB/token) on Qwen3.5-2B, and about **12x of it comes from Qwen3.5's DeltaNet architecture** (18 of 24 layers keep no KV cache), not from this method. On standard architectures (Llama, Mistral) only the ~1.6x applies.
+
+Perplexity was unchanged (1.2498 vs 1.2498) on 281-token windows, latency overhead was about 4%, and the predictor trains in about 30 seconds. All runs were on one NVIDIA RTX 3050 (4 GB), at up to 4968 tokens.
 
 ### How did we produce it?
-1. **Discovered** that transformer keys are temporally predictable (51% via linear AR(2))
-2. **Demonstrated** this is head-dimension dependent (49% at 256-dim, 5% at 64-dim)
-3. **Built** a predictive residual coder that stores only unpredictable key residuals
-4. **Combined** with SVD rank=8 (keys) and INT8 (values) for multiplicative compression
-5. **Verified** via perplexity benchmarks, latency measurements, and full-context stress tests
+1. **Measured** how predictable transformer keys are from the two previous keys with a linear AR(2) model (49% gain at 256-dim heads, 5-6% at 64/128-dim)
+2. **Built** a predictive residual coder that stores only the unpredictable part of each key
+3. **Combined** it with SVD rank=8 (keys) and INT8 (values)
+4. **Checked** perplexity, latency, and a full-context stress test
 
-### Where is it better than current approaches?
-| Dimension | PredictKV | DeepSeek-V4 | KVQuant | StreamingLLM |
-|-----------|-------------|-------------|---------|--------------|
-| Compression | **18.7x** | ~14x | ~4x | Window |
-| PPL change | **0.00** | ~0.1 | ~0.5 | Degrades |
-| Training needed | **30 seconds** | Full model | None | None |
-| Model-agnostic | Partial | No | Yes | Yes |
+### Read the numbers with these caveats
+- **The prediction gain is in-sample.** `train_predictor` fits and scores the predictor on the same keys, collected from short repeated sentences. A held-out, forward-in-time evaluation (fit on earlier tokens, score on later ones, on varied text) has not been done yet, so the 49% figure is an upper bound.
+- **Short windows.** Perplexity was checked on 281-token windows; long generation is untested.
+- **No head-to-head comparison.** Other methods (KVQuant, StreamingLLM, DeepSeek-V4's cache design) were not re-run here on the same models, so no ranking against them is claimed.
 
 ### How can we improve further?
 1. **Extend to 128-dim**: Non-linear predictor (MLP/GRU) may unlock 128-dim architectures (Llama, Mistral)
@@ -43,7 +41,7 @@ A complete inference-time KV cache compression system. **PredictKV** achieves **
 | Key prediction gain | **6%** | **5%** | **49%** |
 | Model | TinyLlama 1.1B | Qwen3-4B | Qwen3.5-2B |
 
-Keys at 256-dim evolve along smooth trajectories (51% predictable via linear AR model). Values at any dimension are chaotic (0% predictable). This asymmetry is a **structural property of transformer attention mechanisms** that has not been previously documented.
+Keys at 256-dim evolve along smooth trajectories (51% predictable via linear AR model). Values at any dimension are chaotic (0% predictable). We have not found this key/value asymmetry documented elsewhere, but it was measured on three small models only (see caveats above).
 
 ---
 
@@ -96,7 +94,7 @@ Standard attention:        144 KB/token
 | 128K | 18.4 GB | **985 MB** | 18.7x |
 | 256K | 36.9 GB | **1.97 GB** | **18.7x** |
 
-All numbers vs standard 4B attention (144 KB/token). The 12x architecture savings from Qwen3.5's DeltaNet layers is separate. Verified on NVIDIA RTX 3050 (4 GB) at up to 4968 tokens.
+These rows are **computed** from the per-token storage formula, not measured; runs were verified only up to 4968 tokens on an NVIDIA RTX 3050 (4 GB). All numbers are vs standard 4B attention (144 KB/token) and include the ~12x that comes from Qwen3.5's DeltaNet layers, not from this method.
 
 ---
 
@@ -175,6 +173,19 @@ Evidence:
 
 ---
 
+## Tests
+
+CPU-only unit tests (no model download): AR(2) fit, compress/decompress round trip, INT8 and SVD error bounds, storage accounting, and a forward-in-time check.
+
+```bash
+pip install torch numpy pytest
+pytest -q tests
+```
+
+`src.predictor.forward_split_gain(keys)` fits the predictor on the earlier tokens and scores it on the later ones, and returns both numbers. On white noise it reports a positive in-sample gain but a negative held-out gain, which is why the in-sample figures above are treated as upper bounds.
+
+---
+
 ## Limitations (Explicit)
 
 1. **Head-dimension dependent**: Full 49% gain requires 256-dim keys. 64-128 dim architectures show 5-6%.
@@ -182,6 +193,7 @@ Evidence:
 3. **Generation horizon**: Perplexity verified on 281-token windows. Long-generation (>1K tokens) pending.
 4. **Retrieval benchmarks**: LongBench, needle-in-haystack not yet tested.
 5. **Model scale**: Only tested on 1-4B. 7B+ unverified.
+6. **In-sample prediction gain**: the predictor is fitted and scored on the same keys; a held-out, forward-in-time evaluation is still to do.
 
 ---
 

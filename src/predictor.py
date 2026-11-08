@@ -196,3 +196,58 @@ def compute_compression_ratio(
         n_attn_layers, n_kv_heads, head_dim, svd_rank, use_int8, prediction_gain
     )
     return baseline / compressed
+
+
+def fit_ar2_least_squares(keys: torch.Tensor) -> KeyPredictor:
+    """Fit a KeyPredictor in closed form (least squares) on a key sequence.
+
+    Args:
+        keys: Key sequence of shape (S, D) for one head, in token order.
+
+    Returns:
+        KeyPredictor whose weights minimise squared error of k_t given
+        [k_{t-2} || k_{t-1}] over this sequence.
+    """
+    keys = keys.float()
+    x = torch.cat([keys[:-2], keys[1:-1], torch.ones(keys.shape[0] - 2, 1)], dim=-1)
+    y = keys[2:]
+    sol = torch.linalg.lstsq(x, y).solution  # (2D + 1, D)
+    d = keys.shape[1]
+    pred = KeyPredictor(d)
+    with torch.no_grad():
+        pred.linear.weight.copy_(sol[:-1].T)
+        pred.linear.bias.copy_(sol[-1])
+    return pred.eval()
+
+
+def prediction_gain(pred: KeyPredictor, keys: torch.Tensor) -> float:
+    """Fraction of key norm removed by prediction: 1 - |residual| / |key|."""
+    keys = keys.float()
+    with torch.no_grad():
+        res = keys[2:] - pred(keys[:-2], keys[1:-1])
+    return float(1 - res.norm(dim=-1).mean() / keys[2:].norm(dim=-1).mean())
+
+
+def forward_split_gain(keys: torch.Tensor, train_frac: float = 0.5) -> Dict[str, float]:
+    """Held-out, forward-in-time evaluation of the AR(2) key predictor.
+
+    Fits on the first ``train_frac`` of the tokens and scores on the rest,
+    so no later token is used to fit the model it is scored with. Returns
+    both the in-sample gain and the held-out gain; a large gap between them
+    means the in-sample number overstates how predictable the keys are.
+
+    Args:
+        keys: Key sequence of shape (S, D) for one head, in token order.
+        train_frac: Fraction of tokens (from the start) used for fitting.
+
+    Returns:
+        {"in_sample": float, "held_out": float}
+    """
+    split = int(keys.shape[0] * train_frac)
+    if split < 4 or keys.shape[0] - split < 3:
+        raise ValueError("sequence too short for a forward split")
+    pred = fit_ar2_least_squares(keys[:split])
+    return {
+        "in_sample": prediction_gain(pred, keys[:split]),
+        "held_out": prediction_gain(pred, keys[split:]),
+    }
